@@ -1,0 +1,38 @@
+#!/bin/bash
+#:  * `hyena-update` [`--check`]
+#:
+#:  Refresh only the Hyena tap (not all of Homebrew), then upgrade Hyena and restart it
+#:  if it was running. `--check` just shows the installed and latest versions.
+set -euo pipefail
+
+TAP_DIR="$(brew --repository hyena-app/tap)"
+echo "==> Refreshing the hyena-app/tap tap"
+git -C "$TAP_DIR" pull --ff-only --quiet
+
+latest="$(sed -n 's/^ *version "\(.*\)"/\1/p' "$TAP_DIR/Casks/hyena.rb" 2>/dev/null | head -1)"
+app="/Applications/Hyena.app"
+installed="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "not installed")"
+echo "Installed: $installed   Latest: ${latest:-unknown}"
+[[ "${1:-}" == "--check" ]] && exit 0
+
+if [[ -n "$latest" && "$installed" == "$latest" ]]; then
+  echo "Hyena is up to date."
+  exit 0
+fi
+
+running=false
+if pgrep -x Hyena >/dev/null; then
+  running=true
+  osascript -e 'quit app "Hyena"' >/dev/null 2>&1 || true
+  for _ in {1..20}; do pgrep -x Hyena >/dev/null || break; sleep 0.25; done
+fi
+
+if brew list --cask hyena >/dev/null 2>&1; then
+  HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask hyena-app/tap/hyena || HOMEBREW_NO_AUTO_UPDATE=1 brew reinstall --cask hyena-app/tap/hyena
+else
+  HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask hyena-app/tap/hyena
+fi
+
+echo "==> Hyena $(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null) installed"
+$running && open "$app"
+exit 0
